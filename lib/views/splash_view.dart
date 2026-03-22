@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants/app_colors.dart';
-import 'onboarding_view.dart';
 import 'home_view.dart';
 
 class SplashView extends StatefulWidget {
@@ -19,24 +17,14 @@ class _SplashViewState extends State<SplashView> {
   }
 
   Future<void> _checkOnboarding() async {
-    await Future.delayed(const Duration(seconds: 2));
-    
-    final prefs = await SharedPreferences.getInstance();
-    final bool hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
+    await Future.delayed(const Duration(seconds: 3));
 
     if (!mounted) return;
 
-    if (hasSeenOnboarding) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeView()),
-      );
-    } else {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const OnboardingView()),
-      );
-    }
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const HomeView()),
+    );
   }
 
   @override
@@ -46,13 +34,13 @@ class _SplashViewState extends State<SplashView> {
       // Welcome-screen görselini tam ekran göster
       body: SizedBox.expand(
         child: Image.asset(
-          'assests/welcome-screen/welcome-screen.png',
+          'assets/welcome-screen/welcome-screen.png',
           fit: BoxFit.cover,
           errorBuilder: (context, error, stackTrace) {
             // Görsel bulunamazsa fallback olarak logoyu göster
             return Center(
               child: Image.asset(
-                'assests/icon/appicon-transparent.png',
+                'assets/icon/appicon-transparent.png',
                 width: 150,
               ),
             );

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -10,6 +9,7 @@ class FirebaseWebRTCService {
   MediaStream? localStream;
   MediaStream? remoteStream;
   String? roomId;
+  bool _isRestarting = false;
 
   Function(MediaStream stream)? onAddRemoteStream;
 
@@ -35,8 +35,20 @@ class FirebaseWebRTCService {
         {
           "urls": [
             "stun:stun.l.google.com:19302",
-            "stun:stun1.l.google.com:19302"
+            "stun:stun1.l.google.com:19302",
+            "stun:stun2.l.google.com:19302",
+            "stun:stun3.l.google.com:19302",
+            "stun:stun4.l.google.com:19302",
           ]
+        },
+        {
+          "urls": [
+            "turn:openrelay.metered.ca:80",
+            "turn:openrelay.metered.ca:443",
+            "turn:openrelay.metered.ca:443?transport=tcp"
+          ],
+          "username": "openrelayproject",
+          "credential": "openrelayproject"
         }
       ]
     };
@@ -97,26 +109,49 @@ class FirebaseWebRTCService {
 
     await peerConnection!.setLocalDescription(offer);
 
-    // 2. Karşı taraf (Ebeveyn) Odaya Girip 'Answer' yazdığında al ve uygula
+    // 2. Karşı taraf (Ebeveyn) Odaya Girip 'Answer' yazdığında veya ICE Restart olduğunda al ve uygula
     roomRef.child('answer').onValue.listen((event) async {
-      final data = event.snapshot.value as Map<dynamic, dynamic>?;
-      if (data != null && data['sdp'] != null) {
-        var answer = RTCSessionDescription(
-          data['sdp'],
-          data['type'],
-        );
-        // Answer'ı ayarla
-        final desc = await peerConnection?.getRemoteDescription();
-        if (desc == null) {
-          await peerConnection?.setRemoteDescription(answer);
+      debugPrint("Firebase Listener: 'answer' triggered. Value exists: ${event.snapshot.value != null}");
+      if (event.snapshot.value == null) return;
+      try {
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        if (data['sdp'] != null) {
+        if (peerConnection?.signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+          try {
+            var answer = RTCSessionDescription(data['sdp'], data['type']);
+            await peerConnection?.setRemoteDescription(answer);
+          } catch (e) {
+            debugPrint("Error setting remote answer: $e");
+          }
         }
+      } catch (e) {
+        debugPrint("Error parsing answer data: $e");
       }
     });
 
+    // Otomatik Yeniden Bağlanma (ICE Restart) Taleplerini Dinle
+    roomRef.child('requestRestart').onValue.listen((event) async {
+      if (event.snapshot.value != null) {
+        debugPrint("Parent requested ICE Restart. Re-negotiating...");
+        _performIceRestart(roomRef);
+      }
+    });
+
+    // İnternet kopmasını/değişmesini kendin tespit edersen yeniden başlat
+    peerConnection!.onIceConnectionState = (state) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        debugPrint("Baby Unit lost connection. Initiating Auto-Reconnect.");
+        _performIceRestart(roomRef);
+      }
+    };
+
     // 3. Karşı Tarafın (Ebeveyn) Ağ Adreslerini (ICE Candidates) Dinle ve Ekle
     roomRef.child('calleeCandidates').onChildAdded.listen((event) {
-      final data = event.snapshot.value as Map<dynamic, dynamic>?;
-      if (data != null && data['candidate'] != null) {
+      if (event.snapshot.value == null) return;
+      try {
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        if (data['candidate'] != null) {
         peerConnection?.addCandidate(
           RTCIceCandidate(
             data['candidate'],
@@ -133,33 +168,54 @@ class FirebaseWebRTCService {
   Future<bool> joinRoom(String room) async {
     roomId = room;
     final roomRef = _db.ref('rooms/$roomId');
-    final roomSnapshot = await roomRef.child('offer').get();
-
-    // Oda yoksa veya yayın başlatılmamışsa false dön
-    if (!roomSnapshot.exists) {
-      return false;
-    }
 
     peerConnection = await _createPeerConnection(false);
 
-    // 1. Bebek Telsizinin (Offer) verisini al ve Remote Description olarak ayarla
-    final data = roomSnapshot.value as Map<dynamic, dynamic>;
-    var offer = RTCSessionDescription(data['sdp'], data['type']);
-    await peerConnection?.setRemoteDescription(offer);
-
-    // 2. Kendi Yanıtımızı (Answer) oluştur ve Firebase'e yaz
-    var answer = await peerConnection!.createAnswer();
-    await peerConnection!.setLocalDescription(answer);
-
-    await roomRef.child('answer').set({
-      'type': answer.type,
-      'sdp': answer.sdp,
+    // 1 & 2. Bebek Telsizinin (Offer) verisini dinamik olarak dinle (İlk bağlantı ve ICE Restart'lar dahil)
+    roomRef.child('offer').onValue.listen((event) async {
+      debugPrint("Firebase Listener: 'offer' triggered. Value exists: ${event.snapshot.value != null}");
+      if (event.snapshot.value == null) return;
+      try {
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        if (data['sdp'] != null) {
+          debugPrint("SignalingState: ${peerConnection?.signalingState}");
+        if (peerConnection?.signalingState == RTCSignalingState.RTCSignalingStateStable) {
+          debugPrint("Received new Offer, generating Answer...");
+          try {
+            var offer = RTCSessionDescription(data['sdp'], data['type']);
+            await peerConnection?.setRemoteDescription(offer);
+            
+            var answer = await peerConnection!.createAnswer();
+            await peerConnection!.setLocalDescription(answer);
+            
+            await roomRef.child('answer').set({
+              'type': answer.type,
+              'sdp': answer.sdp,
+            });
+          } catch (e) {
+            debugPrint("Error responding to offer: $e");
+          }
+        }
+      } catch (e) {
+        debugPrint("Error parsing offer data: $e");
+      }
     });
+
+    // Ebeveyn bağlantısının koptuğunu saptarsa Bebek'ten ICE Restart talep et
+    peerConnection!.onIceConnectionState = (state) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        debugPrint("Parent Unit lost connection. Requesting Auto-Reconnect from Baby.");
+        roomRef.child('requestRestart').set(DateTime.now().millisecondsSinceEpoch);
+      }
+    };
 
     // 3. Odayı açan tarafın (Bebek) Ağ Adreslerini (ICE Candidates) Dinle ve Ekle
     roomRef.child('callerCandidates').onChildAdded.listen((event) {
-      final data = event.snapshot.value as Map<dynamic, dynamic>?;
-      if (data != null && data['candidate'] != null) {
+      if (event.snapshot.value == null) return;
+      try {
+        final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+        if (data['candidate'] != null) {
         peerConnection?.addCandidate(
           RTCIceCandidate(
             data['candidate'],
@@ -182,6 +238,22 @@ class FirebaseWebRTCService {
     
     if (roomId != null) {
       await _db.ref('rooms/$roomId').remove();
+    }
+  }
+
+  Future<void> _performIceRestart(DatabaseReference roomRef) async {
+    if (peerConnection == null || _isRestarting) return;
+    _isRestarting = true;
+    try {
+      RTCSessionDescription offer = await peerConnection!.createOffer({'iceRestart': true});
+      await peerConnection!.setLocalDescription(offer);
+      await roomRef.child('offer').set({'type': offer.type, 'sdp': offer.sdp});
+    } catch (e) {
+      debugPrint("ICE Restart Error: $e");
+    } finally {
+      Future.delayed(const Duration(seconds: 5), () {
+        _isRestarting = false;
+      });
     }
   }
 }

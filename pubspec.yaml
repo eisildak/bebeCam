@@ -65,10 +65,11 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assests/icon/
-    - assests/mock-up/
-    - assests/onboarding/
-    - assests/welcome-screen/
+    - assets/icon/
+    - assets/mock-up/
+    - assets/onboarding/
+    - assets/welcome-screen/
+    - assets/audio/
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
