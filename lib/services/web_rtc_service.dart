@@ -224,15 +224,23 @@ class FirebaseWebRTCService {
       debugPrint('Answer işlendi (id: $answerId)');
     });
 
-    // 3. Callee ICE candidates
+    // 3. Callee ICE candidates - use onValue to handle list refreshes
     _calleeCandidatesSub =
-        roomRef.child('calleeCandidates').onChildAdded.listen((event) {
-      final data = event.snapshot.value as Map<dynamic, dynamic>?;
-      if (data != null && data['candidate'] != null) {
-        peerConnection?.addCandidate(
-          RTCIceCandidate(
-              data['candidate'], data['sdpMid'], data['sdpMLineIndex']),
-        );
+        roomRef.child('calleeCandidates').onValue.listen((event) {
+      final data = event.snapshot.value;
+      if (data is Map) {
+        for (final entry in data.entries) {
+          final candidate = entry.value as Map<dynamic, dynamic>?;
+          if (candidate != null && candidate['candidate'] != null) {
+            peerConnection?.addCandidate(
+              RTCIceCandidate(
+                candidate['candidate'],
+                candidate['sdpMid'],
+                candidate['sdpMLineIndex']
+              ),
+            );
+          }
+        }
       }
     });
 
@@ -330,15 +338,23 @@ class FirebaseWebRTCService {
       debugPrint('ICE restart answer gönderildi (id: $restartAnswerId)');
     });
 
-    // Caller ICE candidates
+    // Caller ICE candidates - use onValue to handle list refreshes
     _callerCandidatesSub =
-        roomRef.child('callerCandidates').onChildAdded.listen((event) {
-      final data = event.snapshot.value as Map<dynamic, dynamic>?;
-      if (data != null && data['candidate'] != null) {
-        peerConnection?.addCandidate(
-          RTCIceCandidate(
-              data['candidate'], data['sdpMid'], data['sdpMLineIndex']),
-        );
+        roomRef.child('callerCandidates').onValue.listen((event) {
+      final data = event.snapshot.value;
+      if (data is Map) {
+        for (final entry in data.entries) {
+          final candidate = entry.value as Map<dynamic, dynamic>?;
+          if (candidate != null && candidate['candidate'] != null) {
+            peerConnection?.addCandidate(
+              RTCIceCandidate(
+                candidate['candidate'],
+                candidate['sdpMid'],
+                candidate['sdpMLineIndex']
+              ),
+            );
+          }
+        }
       }
     });
 

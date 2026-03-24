@@ -32,7 +32,7 @@ class RoomViewModel extends ChangeNotifier {
   Timer? _sessionTimeoutTimer;
   Timer? _iceRestartDelayTimer;
   int _iceRestartAttempts = 0;
-  static const int _maxIceRestartAttempts = 3;
+  static const int _maxIceRestartAttempts = 5;
 
   VoidCallback? onRoomEnded;
 
