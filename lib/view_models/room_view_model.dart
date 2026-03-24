@@ -8,7 +8,8 @@ import 'dart:math';
 
 class RoomViewModel extends ChangeNotifier {
   final FirebaseWebRTCService _webRTCService = FirebaseWebRTCService();
-  
+
+
   DeviceRole currentRole = DeviceRole.none;
   String? roomId;
   
@@ -26,18 +27,78 @@ class RoomViewModel extends ChangeNotifier {
   StreamSubscription? _activeSoundSub;
   StreamSubscription? _babyVolumeSub;
   StreamSubscription? _roomAliveSub;
+  StreamSubscription? _connectivitySub;
+
+  Timer? _sessionTimeoutTimer;
+  Timer? _iceRestartDelayTimer;
+  int _iceRestartAttempts = 0;
+  static const int _maxIceRestartAttempts = 3;
 
   VoidCallback? onRoomEnded;
 
   Future<void> initRenderers() async {
     await localRenderer.initialize();
     await remoteRenderer.initialize();
-    
+
     _webRTCService.onAddRemoteStream = (stream) {
       remoteRenderer.srcObject = stream;
       isConnected = true;
       notifyListeners();
     };
+
+    _webRTCService.onIceConnectionState = _onIceConnectionState;
+  }
+
+  void _onIceConnectionState(RTCIceConnectionState state) {
+    if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+      _startSessionTimeout();
+      if (currentRole == DeviceRole.baby) {
+        // 5sn bekle: WebRTC kendi kendine toparlayabilir (geçici blip)
+        _iceRestartDelayTimer?.cancel();
+        _iceRestartDelayTimer = Timer(const Duration(seconds: 5), _tryIceRestart);
+      }
+    } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+      _startSessionTimeout();
+      if (currentRole == DeviceRole.baby) {
+        // failed durumunda bekleme yok, hemen dene
+        _iceRestartDelayTimer?.cancel();
+        _tryIceRestart();
+      }
+    } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+        state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+      _cancelSessionTimeout();
+      _iceRestartAttempts = 0;
+      _iceRestartDelayTimer?.cancel();
+    }
+  }
+
+  void _tryIceRestart() {
+    if (_iceRestartAttempts >= _maxIceRestartAttempts) {
+      debugPrint('ICE restart: max deneme sayısına ulaşıldı ($_maxIceRestartAttempts)');
+      return;
+    }
+    _iceRestartAttempts++;
+    debugPrint('ICE restart deneme #$_iceRestartAttempts / $_maxIceRestartAttempts');
+    _webRTCService.initiateIceRestart().catchError((e) {
+      debugPrint('ICE restart hatası: $e');
+    });
+  }
+
+  void _startSessionTimeout() {
+    if (_sessionTimeoutTimer?.isActive == true) return;
+    debugPrint('Session timeout başlatıldı (60sn)');
+    _sessionTimeoutTimer = Timer(const Duration(minutes: 1), () {
+      debugPrint('Session timeout doldu, görüşme sonlandırılıyor');
+      onRoomEnded?.call();
+    });
+  }
+
+  void _cancelSessionTimeout() {
+    if (_sessionTimeoutTimer?.isActive == true) {
+      debugPrint('Session timeout iptal edildi (bağlantı yeniden kuruldu)');
+    }
+    _sessionTimeoutTimer?.cancel();
+    _sessionTimeoutTimer = null;
   }
 
   void selectRole(DeviceRole role) {
@@ -63,14 +124,6 @@ class RoomViewModel extends ChangeNotifier {
       if (event.snapshot.value != null) {
         babyVolume = (event.snapshot.value as num).toDouble();
         notifyListeners();
-      }
-    });
-    _roomAliveSub = ref.onValue.listen((event) {
-      if (event.snapshot.value == null) {
-        // The room was deleted in Firebase, meaning the session ended
-        if (roomId != null) {
-          onRoomEnded?.call();
-        }
       }
     });
   }
@@ -100,15 +153,31 @@ class RoomViewModel extends ChangeNotifier {
     final code = (Random().nextInt(9000) + 1000).toString();
     roomId = code;
     
-    // Odayı ilk kurarken varsayılan özellikleri yolla
+    // Odayı ilk kurarken varsayılan özellikleri ve babyAlive flag'ini atomik yaz
     FirebaseDatabase.instance.ref('rooms/$code').update({
       'nightLight': false,
       'activeSound': '',
       'babyVolume': 1.0,
+      'babyAlive': true,
     });
     
-    // Uygulama aniden kapanırsa (kill edilirse) odayı sil
-    FirebaseDatabase.instance.ref('rooms/$code').onDisconnect().remove();
+    // Firebase bağlantısı her kurulduğunda (ilk bağlantı veya yeniden bağlanma)
+    // babyAlive: true yaz ve kill detection'ı yeniden kayıt et.
+    // Bu sayede kısa ağ kopuklukları (Firebase ~60sn sonra onDisconnect çalıştırır)
+    // session'ı bitirmez; yeniden bağlanınca flag sıfırlanır.
+    _connectivitySub = FirebaseDatabase.instance
+        .ref('.info/connected')
+        .onValue
+        .listen((event) {
+      final connected = event.snapshot.value as bool? ?? false;
+      if (connected && roomId != null) {
+        final aliveRef =
+            FirebaseDatabase.instance.ref('rooms/$roomId/babyAlive');
+        aliveRef.set(true);
+        aliveRef.onDisconnect().set(false);
+        debugPrint('Firebase bağlandı: babyAlive sıfırlandı');
+      }
+    });
     
     _listenRoomData(code);
     notifyListeners();
@@ -147,11 +216,21 @@ class RoomViewModel extends ChangeNotifier {
     localRenderer.srcObject = _webRTCService.localStream;
     
     roomId = roomCode;
-    
-    // Uygulama aniden kapanırsa (kill edilirse) odayı sil
-    FirebaseDatabase.instance.ref('rooms/$roomCode').onDisconnect().remove();
-    
+
     _listenRoomData(roomCode);
+
+    // Yalnızca parent babyAlive'ı izler; baby kendi flag'ini izlemez.
+    _roomAliveSub = FirebaseDatabase.instance
+        .ref('rooms/$roomCode/babyAlive')
+        .onValue
+        .listen((event) {
+      final val = event.snapshot.value;
+      if ((val == null || val == false) && roomId != null) {
+        debugPrint('babyAlive: $val → session sonlandırılıyor');
+        onRoomEnded?.call();
+      }
+    });
+
     notifyListeners();
 
     _webRTCService.joinRoom(roomCode).catchError((e) {
@@ -163,13 +242,20 @@ class RoomViewModel extends ChangeNotifier {
   }
 
   Future<void> hangUp() async {
+    _cancelSessionTimeout();
+    _iceRestartDelayTimer?.cancel();
+    _iceRestartAttempts = 0;
     _nightLightSub?.cancel();
     _activeSoundSub?.cancel();
     _babyVolumeSub?.cancel();
     _roomAliveSub?.cancel();
-    
-    if (roomId != null) {
-      FirebaseDatabase.instance.ref('rooms/$roomId').onDisconnect().cancel();
+    _connectivitySub?.cancel();
+
+    if (roomId != null && currentRole == DeviceRole.baby) {
+      // babyAlive onDisconnect'ini iptal et (process ölünce yanlışlıkla tetiklenmesin)
+      FirebaseDatabase.instance.ref('rooms/$roomId/babyAlive').onDisconnect().cancel();
+      // Odayı manuel olarak sil → parent, babyAlive null görünce session'ı bitirir
+      await FirebaseDatabase.instance.ref('rooms/$roomId').remove();
     }
     
     await _webRTCService.hangUp();
@@ -186,10 +272,13 @@ class RoomViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _sessionTimeoutTimer?.cancel();
+    _iceRestartDelayTimer?.cancel();
     _nightLightSub?.cancel();
     _activeSoundSub?.cancel();
     _babyVolumeSub?.cancel();
     _roomAliveSub?.cancel();
+    _connectivitySub?.cancel();
     localRenderer.dispose();
     remoteRenderer.dispose();
     super.dispose();

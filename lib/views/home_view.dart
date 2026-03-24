@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../view_models/room_view_model.dart';
+import '../view_models/room_view_model.dart';
 import '../models/device_role.dart';
 import 'package:provider/provider.dart';
 import 'baby_unit_view.dart';
@@ -8,7 +8,7 @@ import '../core/constants/app_colors.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class HomeView extends StatelessWidget {
-  const HomeView({Key? key}) : super(key: key);
+  const HomeView({super.key});
 
   Future<bool> _checkPermissions(BuildContext context) async {
     Map<Permission, PermissionStatus> statuses = await [
@@ -53,14 +53,14 @@ class HomeView extends StatelessWidget {
   }
 
   void _showJoinRoomDialog(BuildContext context, RoomViewModel vm) {
-    final TextEditingController _roomCtrl = TextEditingController();
+    final TextEditingController roomCtrl = TextEditingController();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.backgroundDim,
         title: const Text('Oda Kodunu Girin', style: TextStyle(color: AppColors.textPrimary)),
         content: TextField(
-          controller: _roomCtrl,
+          controller: roomCtrl,
           style: const TextStyle(color: AppColors.textPrimary),
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
@@ -77,8 +77,8 @@ class HomeView extends StatelessWidget {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.uiAccent),
             onPressed: () async {
-              if (_roomCtrl.text.isNotEmpty) {
-                String code = _roomCtrl.text;
+              if (roomCtrl.text.isNotEmpty) {
+                String code = roomCtrl.text;
                 Navigator.pop(context);
                 
                 await vm.initRenderers();
@@ -182,8 +182,8 @@ class HomeView extends StatelessWidget {
                             ),
                             onPressed: () async {
                               try {
-                              bool granted = await _checkPermissions(context);
-                              if (!granted) return;
+                                bool granted = await _checkPermissions(context);
+                                if (!granted) return;
                                 vm.selectRole(DeviceRole.baby);
                                 await vm.initRenderers();
                                 await vm.startBabyUnit(context);
@@ -229,7 +229,7 @@ class HomeView extends StatelessWidget {
                             ),
                             onPressed: () async {
                               bool granted = await _checkPermissions(context);
-                            if (!granted) return;
+                              if (!granted) return;
                               vm.selectRole(DeviceRole.parent);
                               _showJoinRoomDialog(context, vm);
                             },

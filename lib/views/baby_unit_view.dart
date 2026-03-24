@@ -6,7 +6,7 @@ import '../view_models/room_view_model.dart';
 import '../core/constants/app_colors.dart';
 
 class BabyUnitView extends StatefulWidget {
-  const BabyUnitView({Key? key}) : super(key: key);
+  const BabyUnitView({super.key});
 
   @override
   State<BabyUnitView> createState() => _BabyUnitViewState();
@@ -68,8 +68,9 @@ class _BabyUnitViewState extends State<BabyUnitView> with SingleTickerProviderSt
           await _audioPlayer.stop();
         } else {
           String path = '';
-          if (_activeSound == 'B.Gürültü') path = 'audio/noise.mp3';
-          else if (_activeSound == 'Yağmur') path = 'audio/rain.mp3';
+          if (_activeSound == 'B.Gürültü') {
+            path = 'audio/noise.mp3';
+          } else if (_activeSound == 'Yağmur') path = 'audio/rain.mp3';
           else if (_activeSound == 'Ninni') path = 'audio/lullaby.mp3';
           
           if (path.isNotEmpty) {
@@ -273,7 +274,7 @@ class _BabyUnitViewState extends State<BabyUnitView> with SingleTickerProviderSt
                                     color: AppColors.uiAccent,
                                   ),
                                 ),
-                                const  SizedBox(width: 8),
+                                const SizedBox(width: 8),
                                 const Text(
                                   'Ortam Sesi Aktarılıyor',
                                   style: TextStyle(

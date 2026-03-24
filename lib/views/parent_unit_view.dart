@@ -6,7 +6,7 @@ import '../view_models/room_view_model.dart';
 import '../core/constants/app_colors.dart';
 
 class ParentUnitView extends StatefulWidget {
-  const ParentUnitView({Key? key}) : super(key: key);
+  const ParentUnitView({super.key});
 
   @override
   State<ParentUnitView> createState() => _ParentUnitViewState();
@@ -18,17 +18,18 @@ class _ParentUnitViewState extends State<ParentUnitView> {
   bool _isPTTActive = false;
   double _volume = 0.8;
   bool _isMuted = false;
+  RoomViewModel? _vm;
 
   @override
   void initState() {
     super.initState();
     _startTimer();
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final vm = context.read<RoomViewModel>();
-      vm.onRoomEnded = () {
+      _vm = context.read<RoomViewModel>();
+      _vm!.onRoomEnded = () {
         if (mounted) {
-          vm.hangUp();
+          _vm!.hangUp();
           Navigator.pop(context);
         }
       };
@@ -48,9 +49,7 @@ class _ParentUnitViewState extends State<ParentUnitView> {
   @override
   void dispose() {
     _timer?.cancel();
-    if (mounted) {
-      context.read<RoomViewModel>().onRoomEnded = null;
-    }
+    _vm?.onRoomEnded = null;
     super.dispose();
   }
 

@@ -3,7 +3,7 @@ import '../core/constants/app_colors.dart';
 import 'home_view.dart';
 
 class SplashView extends StatefulWidget {
-  const SplashView({Key? key}) : super(key: key);
+  const SplashView({super.key});
 
   @override
   State<SplashView> createState() => _SplashViewState();

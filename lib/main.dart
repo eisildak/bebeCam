@@ -29,7 +29,7 @@ void main() async {
 }
 
 class BebeCamApp extends StatelessWidget {
-  const BebeCamApp({Key? key}) : super(key: key);
+  const BebeCamApp({super.key});
 
   @override
   Widget build(BuildContext context) {

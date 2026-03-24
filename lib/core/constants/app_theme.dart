@@ -10,7 +10,6 @@ class AppTheme {
       colorScheme: const ColorScheme.dark(
         primary: AppColors.uiAccent,
         secondary: AppColors.pastelYellow,
-        background: AppColors.backgroundDark,
         surface: AppColors.backgroundDark,
       ),
       appBarTheme: const AppBarTheme(
