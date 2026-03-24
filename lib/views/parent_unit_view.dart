@@ -23,6 +23,16 @@ class _ParentUnitViewState extends State<ParentUnitView> {
   void initState() {
     super.initState();
     _startTimer();
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final vm = context.read<RoomViewModel>();
+      vm.onRoomEnded = () {
+        if (mounted) {
+          vm.hangUp();
+          Navigator.pop(context);
+        }
+      };
+    });
   }
 
   void _startTimer() {
@@ -38,6 +48,9 @@ class _ParentUnitViewState extends State<ParentUnitView> {
   @override
   void dispose() {
     _timer?.cancel();
+    if (mounted) {
+      context.read<RoomViewModel>().onRoomEnded = null;
+    }
     super.dispose();
   }
 
@@ -101,6 +114,16 @@ class _ParentUnitViewState extends State<ParentUnitView> {
                             ],
                           ),
                         ),
+                        const SizedBox(width: 16),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.close, color: AppColors.textSecondary, size: 28),
+                          onPressed: () {
+                            context.read<RoomViewModel>().hangUp();
+                            Navigator.pop(context);
+                          },
+                        ),
                       ],
                     ),
                   ],
@@ -141,55 +164,6 @@ class _ParentUnitViewState extends State<ParentUnitView> {
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                           shadows: [Shadow(color: Colors.black.withOpacity(0.8), blurRadius: 4)],
-                        ),
-                      ),
-                    ),
-                    // BAS KONUŞ Button (sol altta, tam ekran içinde)
-                    Positioned(
-                      bottom: 24,
-                      left: 36,
-                      child: GestureDetector(
-                        onTapDown: (_) {
-                          setState(() => _isPTTActive = true);
-                          context.read<RoomViewModel>().setMicrophoneEnabled(true);
-                        },
-                        onTapUp: (_) {
-                          setState(() => _isPTTActive = false);
-                          context.read<RoomViewModel>().setMicrophoneEnabled(false);
-                        },
-                        onTapCancel: () {
-                          setState(() => _isPTTActive = false);
-                          context.read<RoomViewModel>().setMicrophoneEnabled(false);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          width: _isPTTActive ? 75 : 80,
-                          height: _isPTTActive ? 75 : 80,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _isPTTActive ? Colors.redAccent : AppColors.uiAccent.withOpacity(0.9),
-                            border: Border.all(color: Colors.white.withOpacity(0.5), width: 3),
-                            boxShadow: _isPTTActive 
-                              ? [] 
-                              : [BoxShadow(color: AppColors.uiAccent.withOpacity(0.4), blurRadius: 10, spreadRadius: 2)],
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.mic, size: 28, color: _isPTTActive ? Colors.white : AppColors.backgroundDark),
-                              const SizedBox(height: 2),
-                              Text(
-                                'BAS\nKONUŞ',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: _isPTTActive ? Colors.white : AppColors.backgroundDark,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  height: 1.1,
-                                ),
-                              ),
-                            ],
-                          ),
                         ),
                       ),
                     ),
@@ -268,7 +242,7 @@ class _ParentUnitViewState extends State<ParentUnitView> {
               
               const SizedBox(height: 12),
               
-              // Bottom Action Bar - Sadeleştirilmiş (Sadece Night Light ve Ninni var, merkeze hizalı)
+              // Bottom Action Bar - Sadeleştirilmiş (3 buton, merkeze hizalı)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12.0),
                 child: Consumer<RoomViewModel>(
@@ -279,14 +253,58 @@ class _ParentUnitViewState extends State<ParentUnitView> {
                       children: [
                         _buildBottomBtn(
                           Icons.lightbulb_outline, 
-                          'NIGHT\nLIGHT', 
+                          'GECE\nLAMBASI', 
                           vm.isNightLightOn ? Colors.white : AppColors.pastelYellow,
                           isActive: vm.isNightLightOn,
                           onTap: () {
                             vm.toggleNightLight(!vm.isNightLightOn);
                           }
                         ),
-                        const SizedBox(width: 48),
+                        const SizedBox(width: 32),
+                        
+                        // BAS KONUŞ Button (Ortada)
+                        GestureDetector(
+                          onTapDown: (_) {
+                            setState(() => _isPTTActive = true);
+                            context.read<RoomViewModel>().setMicrophoneEnabled(true);
+                          },
+                          onTapUp: (_) {
+                            setState(() => _isPTTActive = false);
+                            context.read<RoomViewModel>().setMicrophoneEnabled(false);
+                          },
+                          onTapCancel: () {
+                            setState(() => _isPTTActive = false);
+                            context.read<RoomViewModel>().setMicrophoneEnabled(false);
+                          },
+                          child: Column(
+                            children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                width: _isPTTActive ? 72 : 64,
+                                height: _isPTTActive ? 72 : 64,
+                                decoration: BoxDecoration(
+                                  color: _isPTTActive ? Colors.redAccent : AppColors.uiAccent,
+                                  shape: BoxShape.circle,
+                                  boxShadow: _isPTTActive ? [] : [BoxShadow(color: AppColors.uiAccent.withOpacity(0.6), blurRadius: 16, spreadRadius: 4)],
+                                ),
+                                child: Icon(Icons.mic, color: _isPTTActive ? Colors.white : AppColors.backgroundDark, size: _isPTTActive ? 36 : 30),
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'BAS KONUŞ',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: _isPTTActive ? Colors.redAccent : AppColors.textPrimary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        
+                        const SizedBox(width: 32),
                         _buildBottomBtn(
                           Icons.music_note, 
                           'NİNNİ', 

@@ -36,12 +36,20 @@ class _BabyUnitViewState extends State<BabyUnitView> with SingleTickerProviderSt
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _vm = context.read<RoomViewModel>();
       _vm.addListener(_onRoomViewModelChange);
+      
+      _vm.onRoomEnded = () {
+        if (mounted) {
+          _vm.hangUp();
+          Navigator.pop(context);
+        }
+      };
     });
   }
 
   @override
   void dispose() {
     _vm.removeListener(_onRoomViewModelChange);
+    _vm.onRoomEnded = null;
     _micAnimController.dispose();
     _audioPlayer.dispose();
     super.dispose();
@@ -175,60 +183,110 @@ class _BabyUnitViewState extends State<BabyUnitView> with SingleTickerProviderSt
                     
                     const Spacer(),
                     
-                    // Compact Mic Indicator
-                    if (vm.isConnected)
-                      Align(
-                      alignment: Alignment.centerRight,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppColors.backgroundDim.withOpacity(0.8),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: AppColors.uiAccent.withOpacity(0.5),
-                              width: 1,
+                    const SizedBox(height: 32),
+                    
+                    // BAS KONUŞ Button (Ortada ve daha büyük)
+                    GestureDetector(
+                      onTapDown: (_) {
+                        setState(() => _isPTTActive = true);
+                        context.read<RoomViewModel>().setMicrophoneEnabled(true);
+                      },
+                      onTapUp: (_) {
+                        setState(() => _isPTTActive = false);
+                        context.read<RoomViewModel>().setMicrophoneEnabled(false);
+                      },
+                      onTapCancel: () {
+                        setState(() => _isPTTActive = false);
+                        context.read<RoomViewModel>().setMicrophoneEnabled(false);
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: _isPTTActive ? 95 : 105,
+                        height: _isPTTActive ? 95 : 105,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isPTTActive ? Colors.redAccent : AppColors.uiAccent.withOpacity(0.9),
+                          border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
+                          boxShadow: _isPTTActive 
+                            ? [] 
+                            : [BoxShadow(color: AppColors.uiAccent.withOpacity(0.4), blurRadius: 10, spreadRadius: 2)],
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.mic, size: 40, color: _isPTTActive ? Colors.white : AppColors.backgroundDark),
+                            const SizedBox(height: 4),
+                            Text(
+                              'BAS\nKONUŞ',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: _isPTTActive ? Colors.white : AppColors.backgroundDark,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                height: 1.1,
+                              ),
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.uiAccent.withOpacity(0.2),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              )
-                            ]
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              AnimatedBuilder(
-                                animation: _micAnimation,
-                                builder: (context, child) {
-                                  return Transform.scale(
-                                    scale: _micAnimation.value,
-                                    child: child,
-                                  );
-                                },
-                                child: const Icon(
-                                  Icons.mic,
-                                  size: 16,
-                                  color: AppColors.uiAccent,
-                                ),
-                              ),
-                              const  SizedBox(width: 8),
-                              const Text(
-                                'Ortam Sesi Aktarılıyor',
-                                style: TextStyle(
-                                  color: AppColors.textPrimary,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
+                          ],
                         ),
                       ),
                     ),
                     
+                    const SizedBox(height: 16),
+                    
+                    // Ortam Sesi Aktarılıyor (Mic Indicator) - Merkezde
+                    if (vm.isConnected)
+                      Align(
+                        alignment: Alignment.center,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.backgroundDim.withOpacity(0.8),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: AppColors.uiAccent.withOpacity(0.5),
+                                width: 1,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.uiAccent.withOpacity(0.2),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                )
+                              ]
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AnimatedBuilder(
+                                  animation: _micAnimation,
+                                  builder: (context, child) {
+                                    return Transform.scale(
+                                      scale: _micAnimation.value,
+                                      child: child,
+                                    );
+                                  },
+                                  child: const Icon(
+                                    Icons.mic,
+                                    size: 16,
+                                    color: AppColors.uiAccent,
+                                  ),
+                                ),
+                                const  SizedBox(width: 8),
+                                const Text(
+                                  'Ortam Sesi Aktarılıyor',
+                                  style: TextStyle(
+                                    color: AppColors.textPrimary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      
                     const SizedBox(height: 16),
                     
                     // Sound Options
@@ -269,55 +327,6 @@ class _BabyUnitViewState extends State<BabyUnitView> with SingleTickerProviderSt
                 ),
               ),
 
-              // BAS KONUŞ Button (sol altta, ses panelinin tam üstünde)
-              Positioned(
-                bottom: 120,
-                left: 32,
-                child: GestureDetector(
-                  onTapDown: (_) {
-                    setState(() => _isPTTActive = true);
-                    context.read<RoomViewModel>().setMicrophoneEnabled(true);
-                  },
-                  onTapUp: (_) {
-                    setState(() => _isPTTActive = false);
-                    context.read<RoomViewModel>().setMicrophoneEnabled(false);
-                  },
-                  onTapCancel: () {
-                    setState(() => _isPTTActive = false);
-                    context.read<RoomViewModel>().setMicrophoneEnabled(false);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: _isPTTActive ? 75 : 80,
-                    height: _isPTTActive ? 75 : 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _isPTTActive ? Colors.redAccent : AppColors.uiAccent.withOpacity(0.9),
-                      border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
-                      boxShadow: _isPTTActive 
-                        ? [] 
-                        : [BoxShadow(color: AppColors.uiAccent.withOpacity(0.4), blurRadius: 8, spreadRadius: 1)],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.mic, size: 32, color: _isPTTActive ? Colors.white : AppColors.backgroundDark),
-                        const SizedBox(height: 2),
-                        Text(
-                          'BAS\nKONUŞ',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: _isPTTActive ? Colors.white : AppColors.backgroundDark,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            height: 1.1,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
             ],
           );
         },

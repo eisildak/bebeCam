@@ -25,6 +25,9 @@ class RoomViewModel extends ChangeNotifier {
   StreamSubscription? _nightLightSub;
   StreamSubscription? _activeSoundSub;
   StreamSubscription? _babyVolumeSub;
+  StreamSubscription? _roomAliveSub;
+
+  VoidCallback? onRoomEnded;
 
   Future<void> initRenderers() async {
     await localRenderer.initialize();
@@ -62,6 +65,14 @@ class RoomViewModel extends ChangeNotifier {
         notifyListeners();
       }
     });
+    _roomAliveSub = ref.onValue.listen((event) {
+      if (event.snapshot.value == null) {
+        // The room was deleted in Firebase, meaning the session ended
+        if (roomId != null) {
+          onRoomEnded?.call();
+        }
+      }
+    });
   }
 
   void toggleNightLight(bool enabled) {
@@ -95,6 +106,9 @@ class RoomViewModel extends ChangeNotifier {
       'activeSound': '',
       'babyVolume': 1.0,
     });
+    
+    // Uygulama aniden kapanırsa (kill edilirse) odayı sil
+    FirebaseDatabase.instance.ref('rooms/$code').onDisconnect().remove();
     
     _listenRoomData(code);
     notifyListeners();
@@ -133,6 +147,10 @@ class RoomViewModel extends ChangeNotifier {
     localRenderer.srcObject = _webRTCService.localStream;
     
     roomId = roomCode;
+    
+    // Uygulama aniden kapanırsa (kill edilirse) odayı sil
+    FirebaseDatabase.instance.ref('rooms/$roomCode').onDisconnect().remove();
+    
     _listenRoomData(roomCode);
     notifyListeners();
 
@@ -148,6 +166,11 @@ class RoomViewModel extends ChangeNotifier {
     _nightLightSub?.cancel();
     _activeSoundSub?.cancel();
     _babyVolumeSub?.cancel();
+    _roomAliveSub?.cancel();
+    
+    if (roomId != null) {
+      FirebaseDatabase.instance.ref('rooms/$roomId').onDisconnect().cancel();
+    }
     
     await _webRTCService.hangUp();
     localRenderer.srcObject = null;
@@ -166,6 +189,7 @@ class RoomViewModel extends ChangeNotifier {
     _nightLightSub?.cancel();
     _activeSoundSub?.cancel();
     _babyVolumeSub?.cancel();
+    _roomAliveSub?.cancel();
     localRenderer.dispose();
     remoteRenderer.dispose();
     super.dispose();

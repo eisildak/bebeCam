@@ -79,8 +79,11 @@ class FirebaseWebRTCService {
   Future<String> createRoom(String room) async {
     roomId = room;
     final roomRef = _db.ref('rooms/$roomId');
-    // Odada önceden kalıntı veri varsa temizle
-    await roomRef.remove();
+    // Odada önceden kalıntı WebRTC verileri varsa temizle
+    await roomRef.child('offer').remove();
+    await roomRef.child('answer').remove();
+    await roomRef.child('callerCandidates').remove();
+    await roomRef.child('calleeCandidates').remove();
 
     peerConnection = await _createPeerConnection(true);
 
