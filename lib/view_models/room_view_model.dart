@@ -33,6 +33,8 @@ class RoomViewModel extends ChangeNotifier {
   Timer? _iceRestartDelayTimer;
   int _iceRestartAttempts = 0;
   static const int _maxIceRestartAttempts = 5;
+  static const int _initialRestartDelaySeconds = 10;  // Give network time to settle
+  static const int _sessionTimeoutSeconds = 120;      // Longer timeout for network transitions
 
   VoidCallback? onRoomEnded;
 
@@ -53,22 +55,27 @@ class RoomViewModel extends ChangeNotifier {
     if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
       _startSessionTimeout();
       if (currentRole == DeviceRole.baby) {
-        // 5sn bekle: WebRTC kendi kendine toparlayabilir (geçici blip)
+        // Network might be transitioning; wait longer before restart attempt
         _iceRestartDelayTimer?.cancel();
-        _iceRestartDelayTimer = Timer(const Duration(seconds: 5), _tryIceRestart);
+        final delaySeconds = _initialRestartDelaySeconds + (_iceRestartAttempts * 5);
+        debugPrint('ICE DISCONNECTED: ${delaySeconds}sn sonra restart denenecek');
+        _iceRestartDelayTimer = Timer(Duration(seconds: delaySeconds), _tryIceRestart);
       }
     } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
       _startSessionTimeout();
       if (currentRole == DeviceRole.baby) {
-        // failed durumunda bekleme yok, hemen dene
+        // Failed state: try restart with exponential backoff
         _iceRestartDelayTimer?.cancel();
-        _tryIceRestart();
+        final delaySeconds = _initialRestartDelaySeconds + (_iceRestartAttempts * 5);
+        debugPrint('ICE FAILED: ${delaySeconds}sn sonra restart denenecek');
+        _iceRestartDelayTimer = Timer(Duration(seconds: delaySeconds), _tryIceRestart);
       }
     } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
         state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
       _cancelSessionTimeout();
       _iceRestartAttempts = 0;
       _iceRestartDelayTimer?.cancel();
+      debugPrint('ICE CONNECTED/COMPLETED: Bağlantı başarılı!');
     }
   }
 
@@ -86,8 +93,8 @@ class RoomViewModel extends ChangeNotifier {
 
   void _startSessionTimeout() {
     if (_sessionTimeoutTimer?.isActive == true) return;
-    debugPrint('Session timeout başlatıldı (60sn)');
-    _sessionTimeoutTimer = Timer(const Duration(minutes: 1), () {
+    debugPrint('Session timeout başlatıldı (${_sessionTimeoutSeconds}sn)');
+    _sessionTimeoutTimer = Timer(Duration(seconds: _sessionTimeoutSeconds), () {
       debugPrint('Session timeout doldu, görüşme sonlandırılıyor');
       onRoomEnded?.call();
     });
