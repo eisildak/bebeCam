@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../services/web_rtc_service.dart';
 import '../models/device_role.dart';
@@ -8,6 +9,8 @@ import 'dart:math';
 
 class RoomViewModel extends ChangeNotifier {
   final FirebaseWebRTCService _webRTCService = FirebaseWebRTCService();
+
+  String? get _currentUid => FirebaseAuth.instance.currentUser?.uid;
 
 
   DeviceRole currentRole = DeviceRole.none;
@@ -17,6 +20,12 @@ class RoomViewModel extends ChangeNotifier {
   RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
   
   bool isConnected = false;
+  bool isBusy = false;
+
+  void setBusy(bool value) {
+    isBusy = value;
+    notifyListeners();
+  }
   
   // Odayla senkronize edilecek değerler
   bool isNightLightOn = false;
@@ -153,7 +162,23 @@ class RoomViewModel extends ChangeNotifier {
     }
   }
 
+  Future<String?> _waitForUid({int maxWaitMs = 5000}) async {
+    const step = 200;
+    int elapsed = 0;
+    while (_currentUid == null && elapsed < maxWaitMs) {
+      await Future.delayed(const Duration(milliseconds: step));
+      elapsed += step;
+    }
+    return _currentUid;
+  }
+
   Future<void> startBabyUnit(BuildContext context) async {
+    try {
+    final uid = await _waitForUid();
+    if (uid == null) {
+      throw StateError('Firebase auth could not be established. Please check your connection.');
+    }
+
     await _webRTCService.openUserMedia(video: true, audio: true);
     localRenderer.srcObject = _webRTCService.localStream;
     
@@ -162,6 +187,8 @@ class RoomViewModel extends ChangeNotifier {
     
     // Odayı ilk kurarken varsayılan özellikleri ve babyAlive flag'ini atomik yaz
     FirebaseDatabase.instance.ref('rooms/$code').update({
+      'createdBy': uid,
+      'members': {uid: true},
       'nightLight': false,
       'activeSound': '',
       'babyVolume': 1.0,
@@ -187,12 +214,29 @@ class RoomViewModel extends ChangeNotifier {
     });
     
     _listenRoomData(code);
+
+    // Parent ayrıldığında baby'yi bilgilendir.
+    // parentAlive yalnızca parent katıldığında yazılır; null = henüz katılmadı, false = ayrıldı.
+    _roomAliveSub = FirebaseDatabase.instance
+        .ref('rooms/$code/parentAlive')
+        .onValue
+        .listen((event) {
+      final val = event.snapshot.value;
+      if (val == false && roomId != null) {
+        debugPrint('parentAlive: false → parent ayrıldı, session sonlandırılıyor');
+        onRoomEnded?.call();
+      }
+    });
+
     notifyListeners();
     
     _webRTCService.createRoom(code).catchError((e) {
       debugPrint("Firebase Room Error: $e");
       return "";
     });
+    } catch (_) {
+      rethrow;
+    }
   }
 
   void setMicrophoneEnabled(bool enabled) {
@@ -214,8 +258,25 @@ class RoomViewModel extends ChangeNotifier {
   }
 
   Future<bool> startParentUnit(String roomCode) async {
+    try {
     roomCode = roomCode.trim();
-    final roomSnapshot = await FirebaseDatabase.instance.ref('rooms/$roomCode').get();
+    final uid = await _waitForUid();
+    if (uid == null) {
+      return false;
+    }
+
+    final roomRef = FirebaseDatabase.instance.ref('rooms/$roomCode');
+
+    // Register this device as a room member and signal presence before reading.
+    try {
+      await roomRef.child('members/$uid').set(true);
+      await roomRef.child('parentAlive').set(true);
+      roomRef.child('parentAlive').onDisconnect().set(false);
+    } catch (_) {
+      return false;
+    }
+
+    final roomSnapshot = await roomRef.get();
     if (!roomSnapshot.exists) return false;
 
     await _webRTCService.openUserMedia(video: false, audio: true);
@@ -226,9 +287,9 @@ class RoomViewModel extends ChangeNotifier {
 
     _listenRoomData(roomCode);
 
-    // Yalnızca parent babyAlive'ı izler; baby kendi flag'ini izlemez.
-    _roomAliveSub = FirebaseDatabase.instance
-        .ref('rooms/$roomCode/babyAlive')
+    // Parent, babyAlive'ı izler; baby ayrılınca (null veya false) session kapanır.
+    _roomAliveSub = roomRef
+        .child('babyAlive')
         .onValue
         .listen((event) {
       final val = event.snapshot.value;
@@ -246,6 +307,9 @@ class RoomViewModel extends ChangeNotifier {
     });
 
     return true;
+    } catch (_) {
+      rethrow;
+    }
   }
 
   Future<void> hangUp() async {
@@ -259,10 +323,26 @@ class RoomViewModel extends ChangeNotifier {
     _connectivitySub?.cancel();
 
     if (roomId != null && currentRole == DeviceRole.baby) {
-      // babyAlive onDisconnect'ini iptal et (process ölünce yanlışlıkla tetiklenmesin)
+      // babyAlive onDisconnect'ini iptal et
       FirebaseDatabase.instance.ref('rooms/$roomId/babyAlive').onDisconnect().cancel();
-      // Odayı manuel olarak sil → parent, babyAlive null görünce session'ı bitirir
-      await FirebaseDatabase.instance.ref('rooms/$roomId').remove();
+      // babyAlive: false yaz → parent'ın listener'ı tetiklenir.
+      // Ardından odayı sil — baby her zaman cleanup yapar.
+      try {
+        await FirebaseDatabase.instance.ref('rooms/$roomId/babyAlive').set(false);
+      } catch (_) {}
+      try {
+        await FirebaseDatabase.instance.ref('rooms/$roomId').remove();
+      } catch (_) {}
+    }
+
+    if (roomId != null && currentRole == DeviceRole.parent) {
+      // parentAlive onDisconnect'ini iptal et, ardından false yaz → baby'nin listener'ı tetiklenir.
+      // Odayı SILME — oda silinirse baby güvenlik kuralı gereği eventi alamaz.
+      // Baby eventi alınca kendi hangUp()'ında odayı kaldırır.
+      FirebaseDatabase.instance.ref('rooms/$roomId/parentAlive').onDisconnect().cancel();
+      try {
+        await FirebaseDatabase.instance.ref('rooms/$roomId/parentAlive').set(false);
+      } catch (_) {}
     }
     
     await _webRTCService.hangUp();

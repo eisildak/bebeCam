@@ -7,9 +7,14 @@ import 'parent_unit_view.dart';
 import '../core/constants/app_colors.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-class HomeView extends StatelessWidget {
+class HomeView extends StatefulWidget {
   const HomeView({super.key});
 
+  @override
+  State<HomeView> createState() => _HomeViewState();
+}
+
+class _HomeViewState extends State<HomeView> {
   Future<bool> _checkPermissions(BuildContext context) async {
     Map<Permission, PermissionStatus> statuses = await [
       Permission.camera,
@@ -52,7 +57,7 @@ class HomeView extends StatelessWidget {
     return true;
   }
 
-  void _showJoinRoomDialog(BuildContext context, RoomViewModel vm) {
+  void _showJoinRoomDialog(BuildContext context, RoomViewModel vm) {    
     final TextEditingController roomCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -113,7 +118,7 @@ class HomeView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final vm = context.read<RoomViewModel>();
+    final vm = context.watch<RoomViewModel>();
 
     return Scaffold(
       body: Container(
@@ -167,7 +172,16 @@ class HomeView extends StatelessWidget {
                           ),
                           const SizedBox(height: 60),
                           ElevatedButton.icon(
-                            icon: const Icon(Icons.videocam_outlined),
+                            icon: vm.isBusy
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.uiAccent,
+                                    ),
+                                  )
+                                : const Icon(Icons.videocam_outlined),
                             label: const Text('Bebek Ünitesi (Kamera)'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 20),
@@ -180,10 +194,14 @@ class HomeView extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(20),
                               ),
                             ),
-                            onPressed: () async {
+                            onPressed: vm.isBusy ? null : () async {
+                              vm.setBusy(true);
                               try {
                                 bool granted = await _checkPermissions(context);
-                                if (!granted) return;
+                                if (!granted) {
+                                  vm.setBusy(false);
+                                  return;
+                                }
                                 vm.selectRole(DeviceRole.baby);
                                 await vm.initRenderers();
                                 await vm.startBabyUnit(context);
@@ -210,12 +228,23 @@ class HomeView extends StatelessWidget {
                                   );
                                 }
                                 debugPrint("WebRTC Error: $e\n$stackTrace");
+                              } finally {
+                                vm.setBusy(false);
                               }
                             },
                           ),
                           const SizedBox(height: 20),
                           ElevatedButton.icon(
-                            icon: const Icon(Icons.phone_iphone),
+                            icon: vm.isBusy
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.charcoalBlack,
+                                    ),
+                                  )
+                                : const Icon(Icons.phone_iphone),
                             label: const Text('Ebeveyn Ünitesi (İzleyici)'),
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 20),
@@ -227,9 +256,14 @@ class HomeView extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(20),
                               ),
                             ),
-                            onPressed: () async {
+                            onPressed: vm.isBusy ? null : () async {
+                              vm.setBusy(true);
                               bool granted = await _checkPermissions(context);
-                              if (!granted) return;
+                              if (!granted) {
+                                vm.setBusy(false);
+                                return;
+                              }
+                              vm.setBusy(false);
                               vm.selectRole(DeviceRole.parent);
                               _showJoinRoomDialog(context, vm);
                             },

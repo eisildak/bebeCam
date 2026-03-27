@@ -1,0 +1,53 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$roomId": {
+        ".read": "auth != null && data.child('members').child(auth.uid).val() === true",
+        ".write": "auth != null && (data.child('members').child(auth.uid).val() === true || (!data.exists() && newData.child('members').child(auth.uid).val() === true))",
+        "members": {
+          "$uid": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && auth.uid === $uid && ((!data.exists() && root.child('rooms').child($roomId).exists()) || root.child('rooms').child($roomId).child('members').child(auth.uid).val() === true)",
+            ".validate": "newData.val() === true"
+          }
+        },
+        "nightLight": {
+          ".validate": "newData.isBoolean()"
+        },
+        "activeSound": {
+          ".validate": "newData.isString()"
+        },
+        "babyVolume": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+        },
+        "babyAlive": {
+          ".validate": "newData.isBoolean()"
+        },
+        "parentAlive": {
+          ".validate": "newData.isBoolean()"
+        },
+        "offer": {
+          ".validate": "newData.hasChildren(['type', 'sdp'])"
+        },
+        "answer": {
+          ".validate": "newData.hasChildren(['type', 'sdp'])"
+        },
+        "callerCandidates": {
+          "$candidateId": {
+            ".validate": "newData.hasChildren(['candidate'])"
+          }
+        },
+        "calleeCandidates": {
+          "$candidateId": {
+            ".validate": "newData.hasChildren(['candidate'])"
+          }
+        },
+        "createdBy": {
+          ".validate": "newData.isString()"
+        }
+      }
+    }
+  }
+}

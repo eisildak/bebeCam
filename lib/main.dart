@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,7 @@ import 'view_models/room_view_model.dart';
 import 'views/splash_view.dart';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -21,8 +23,14 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (e) {
-    // Android'de google-services.json native olarak Firebase'i daha dart kodu çalışmadan 
+    // Android'de google-services.json native olarak Firebase'i daha dart kodu çalışmadan
     // başlattığı için bazen duplicate-app hatası döner, bu durumu yoksayıyoruz.
+  }
+
+  // Realtime Database access is protected by auth-based rules.
+  // Fire-and-forget: don't block runApp on network; RoomViewModel guards usage.
+  if (FirebaseAuth.instance.currentUser == null) {
+    unawaited(FirebaseAuth.instance.signInAnonymously());
   }
 
   runApp(const BebeCamApp());
