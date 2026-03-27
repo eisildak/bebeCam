@@ -224,23 +224,19 @@ class FirebaseWebRTCService {
       debugPrint('Answer işlendi (id: $answerId)');
     });
 
-    // 3. Callee ICE candidates - use onValue to handle list refreshes
+    // 3. Callee ICE candidates — onChildAdded: her yeni aday sadece bir kez işlenir.
+    // onValue kullanılsaydı ICE restart sonrası tüm liste tekrar eklenirdi.
     _calleeCandidatesSub =
-        roomRef.child('calleeCandidates').onValue.listen((event) {
-      final data = event.snapshot.value;
-      if (data is Map) {
-        for (final entry in data.entries) {
-          final candidate = entry.value as Map<dynamic, dynamic>?;
-          if (candidate != null && candidate['candidate'] != null) {
-            peerConnection?.addCandidate(
-              RTCIceCandidate(
-                candidate['candidate'],
-                candidate['sdpMid'],
-                candidate['sdpMLineIndex']
-              ),
-            );
-          }
-        }
+        roomRef.child('calleeCandidates').onChildAdded.listen((event) {
+      final candidate = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (candidate != null && candidate['candidate'] != null) {
+        peerConnection?.addCandidate(
+          RTCIceCandidate(
+            candidate['candidate'],
+            candidate['sdpMid'],
+            candidate['sdpMLineIndex'],
+          ),
+        );
       }
     });
 
@@ -262,8 +258,23 @@ class FirebaseWebRTCService {
       final offerId = DateTime.now().millisecondsSinceEpoch.toString();
       final roomRef = _db.ref('rooms/$roomId');
 
-      // Eski caller candidates'ları temizle, yenileri toplanacak
+      // Eski caller candidates'ları temizle, yenileri toplanacak.
+      // onChildAdded listener'ı iptal edip yeniden başlat; böylece
+      // temizleme sonrası eklenen yeni adaylar tekrar işlenir.
       await roomRef.child('callerCandidates').remove();
+      _calleeCandidatesSub?.cancel();
+      _calleeCandidatesSub = roomRef.child('calleeCandidates').onChildAdded.listen((event) {
+        final candidate = event.snapshot.value as Map<dynamic, dynamic>?;
+        if (candidate != null && candidate['candidate'] != null) {
+          peerConnection?.addCandidate(
+            RTCIceCandidate(
+              candidate['candidate'],
+              candidate['sdpMid'],
+              candidate['sdpMLineIndex'],
+            ),
+          );
+        }
+      });
       await roomRef.child('offer').set({
         'type': offer.type,
         'sdp': offer.sdp,
@@ -323,8 +334,21 @@ class FirebaseWebRTCService {
       final restartOffer = RTCSessionDescription(data['sdp'], data['type']);
       await peerConnection?.setRemoteDescription(restartOffer);
 
-      // Eski callee candidates'ları temizle
+      // Eski callee candidates'ları temizle ve listener'ı yeniden kur
       await roomRef.child('calleeCandidates').remove();
+      _callerCandidatesSub?.cancel();
+      _callerCandidatesSub = roomRef.child('callerCandidates').onChildAdded.listen((event) {
+        final candidate = event.snapshot.value as Map<dynamic, dynamic>?;
+        if (candidate != null && candidate['candidate'] != null) {
+          peerConnection?.addCandidate(
+            RTCIceCandidate(
+              candidate['candidate'],
+              candidate['sdpMid'],
+              candidate['sdpMLineIndex'],
+            ),
+          );
+        }
+      });
 
       final restartAnswer = await peerConnection!.createAnswer();
       await peerConnection!.setLocalDescription(restartAnswer);
@@ -338,23 +362,18 @@ class FirebaseWebRTCService {
       debugPrint('ICE restart answer gönderildi (id: $restartAnswerId)');
     });
 
-    // Caller ICE candidates - use onValue to handle list refreshes
+    // Caller ICE candidates — onChildAdded: her yeni aday sadece bir kez işlenir.
     _callerCandidatesSub =
-        roomRef.child('callerCandidates').onValue.listen((event) {
-      final data = event.snapshot.value;
-      if (data is Map) {
-        for (final entry in data.entries) {
-          final candidate = entry.value as Map<dynamic, dynamic>?;
-          if (candidate != null && candidate['candidate'] != null) {
-            peerConnection?.addCandidate(
-              RTCIceCandidate(
-                candidate['candidate'],
-                candidate['sdpMid'],
-                candidate['sdpMLineIndex']
-              ),
-            );
-          }
-        }
+        roomRef.child('callerCandidates').onChildAdded.listen((event) {
+      final candidate = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (candidate != null && candidate['candidate'] != null) {
+        peerConnection?.addCandidate(
+          RTCIceCandidate(
+            candidate['candidate'],
+            candidate['sdpMid'],
+            candidate['sdpMLineIndex'],
+          ),
+        );
       }
     });
 

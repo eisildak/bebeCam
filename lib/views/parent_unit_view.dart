@@ -144,9 +144,29 @@ class _ParentUnitViewState extends State<ParentUnitView> {
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(24),
-                            child: RTCVideoView(
-                              vm.remoteRenderer,
-                              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                RTCVideoView(
+                                  vm.remoteRenderer,
+                                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                                ),
+                                if (vm.isReconnecting)
+                                  Container(
+                                    color: Colors.black.withOpacity(0.75),
+                                    child: const Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        CircularProgressIndicator(color: Colors.white),
+                                        SizedBox(height: 16),
+                                        Text(
+                                          'Yeniden bağlanıyor...',
+                                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         );

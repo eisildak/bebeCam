@@ -130,6 +130,25 @@ class _BabyUnitViewState extends State<BabyUnitView> with SingleTickerProviderSt
                   ),
                 ),
 
+              // RECONNECTING OVERLAY
+              if (vm.isReconnecting)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black.withOpacity(0.75),
+                    child: const Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(color: Colors.white),
+                        SizedBox(height: 20),
+                        Text(
+                          'Yeniden bağlanıyor...',
+                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
               SafeArea(
                 child: Column(
                   children: [

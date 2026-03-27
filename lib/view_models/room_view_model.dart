@@ -21,6 +21,7 @@ class RoomViewModel extends ChangeNotifier {
   
   bool isConnected = false;
   bool isBusy = false;
+  bool isReconnecting = false;
 
   void setBusy(bool value) {
     isBusy = value;
@@ -37,6 +38,14 @@ class RoomViewModel extends ChangeNotifier {
   StreamSubscription? _babyVolumeSub;
   StreamSubscription? _roomAliveSub;
   StreamSubscription? _connectivitySub;
+
+  // Ağ geçişi sırasında Firebase onDisconnect erken tetiklenir.
+  // Diğer taraf false yaptığında hemen değil, grace period sonunda session bitir.
+  Timer? _peerGraceTimer;
+  static const int _peerGraceSeconds = 45;
+
+  Timer? _reconnectingTimeoutTimer;
+  static const int _reconnectingTimeoutSeconds = 90;
 
   Timer? _sessionTimeoutTimer;
   Timer? _iceRestartDelayTimer;
@@ -61,36 +70,66 @@ class RoomViewModel extends ChangeNotifier {
   }
 
   void _onIceConnectionState(RTCIceConnectionState state) {
-    if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
-      _startSessionTimeout();
-      if (currentRole == DeviceRole.baby) {
-        // Network might be transitioning; wait longer before restart attempt
-        _iceRestartDelayTimer?.cancel();
-        final delaySeconds = _initialRestartDelaySeconds + (_iceRestartAttempts * 5);
-        debugPrint('ICE DISCONNECTED: ${delaySeconds}sn sonra restart denenecek');
-        _iceRestartDelayTimer = Timer(Duration(seconds: delaySeconds), _tryIceRestart);
+    if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+        state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+      // Kullanıcıya reconnecting göster
+      isReconnecting = true;
+      isConnected = false;
+      notifyListeners();
+
+      // Reconnecting başladığında 90 saniyelik hard timeout başlat.
+      // Bağlantı kurulursa iptal edilir; kurulmazsa session sonlanır.
+      if (_reconnectingTimeoutTimer?.isActive != true) {
+        debugPrint('Reconnecting timeout başlatıldı ($_reconnectingTimeoutSeconds sn)');
+        _reconnectingTimeoutTimer = Timer(
+          const Duration(seconds: _reconnectingTimeoutSeconds),
+          () {
+            debugPrint('Reconnecting timeout doldu → session sonlandırılıyor');
+            onRoomEnded?.call();
+          },
+        );
       }
-    } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-      _startSessionTimeout();
-      if (currentRole == DeviceRole.baby) {
-        // Failed state: try restart with exponential backoff
-        _iceRestartDelayTimer?.cancel();
-        final delaySeconds = _initialRestartDelaySeconds + (_iceRestartAttempts * 5);
-        debugPrint('ICE FAILED: ${delaySeconds}sn sonra restart denenecek');
-        _iceRestartDelayTimer = Timer(Duration(seconds: delaySeconds), _tryIceRestart);
-      }
+
+      // Her iki role de ICE restart başlatabilir; baby offer yazar, parent yanıtlar.
+      // Parent ağ değiştiğinde de baby restart başlatmalı — ancak baby offer
+      // oluşturabilir (caller), parent sadece yanıtlar. Dolayısıyla restart
+      // yalnızca baby (caller) tarafından başlatılır. Parent ağ değişince
+      // ICE disconnected/failed olur, baby bunu görür ve restart başlatır.
+      _iceRestartDelayTimer?.cancel();
+      final delaySeconds = _iceRestartAttempts == 0
+          ? 2  // İlk denemede hızlı başla
+          : _initialRestartDelaySeconds + (_iceRestartAttempts * 5);
+      debugPrint('ICE ${state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ? "DISCONNECTED" : "FAILED"}: '
+          '${delaySeconds}sn sonra restart (deneme #${_iceRestartAttempts + 1})');
+      _iceRestartDelayTimer = Timer(Duration(seconds: delaySeconds), _tryIceRestart);
     } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
         state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
       _cancelSessionTimeout();
       _iceRestartAttempts = 0;
       _iceRestartDelayTimer?.cancel();
+      _reconnectingTimeoutTimer?.cancel();
+      _reconnectingTimeoutTimer = null;
+      isReconnecting = false;
+      isConnected = true;
+      notifyListeners();
       debugPrint('ICE CONNECTED/COMPLETED: Bağlantı başarılı!');
     }
   }
 
   void _tryIceRestart() {
     if (_iceRestartAttempts >= _maxIceRestartAttempts) {
-      debugPrint('ICE restart: max deneme sayısına ulaşıldı ($_maxIceRestartAttempts)');
+      debugPrint('ICE restart: max deneme sayısına ulaşıldı ($_maxIceRestartAttempts) → session sonlandırılıyor');
+      // Tüm denemeler tükendi, artık session'ı bitir
+      _startSessionTimeout();
+      return;
+    }
+    // Sadece caller (baby) restart offer yazabilir
+    if (currentRole != DeviceRole.baby) {
+      debugPrint('ICE restart: parent role, baby restart bekleniyor...');
+      // Parent tarafında da deneme sayısını artır, çok uzun süre sessiz kalmasın
+      _iceRestartAttempts++;
+      final delaySeconds = _initialRestartDelaySeconds + (_iceRestartAttempts * 5);
+      _iceRestartDelayTimer = Timer(Duration(seconds: delaySeconds), _tryIceRestart);
       return;
     }
     _iceRestartAttempts++;
@@ -219,14 +258,26 @@ class RoomViewModel extends ChangeNotifier {
 
     // Parent ayrıldığında baby'yi bilgilendir.
     // parentAlive yalnızca parent katıldığında yazılır; null = henüz katılmadı, false = ayrıldı.
+    // Ağ geçişinde Firebase onDisconnect false yazar; grace period ile gerçek ayrılma beklenilir.
     _roomAliveSub = FirebaseDatabase.instance
         .ref('rooms/$code/parentAlive')
         .onValue
         .listen((event) {
       final val = event.snapshot.value;
       if (val == false && roomId != null) {
-        debugPrint('parentAlive: false → parent ayrıldı, session sonlandırılıyor');
-        onRoomEnded?.call();
+        // Hemen bitirme — grace period başlat
+        _peerGraceTimer?.cancel();
+        debugPrint('parentAlive: false → grace period başlatıldı ($_peerGraceSeconds sn)');
+        _peerGraceTimer = Timer(const Duration(seconds: _peerGraceSeconds), () {
+          if (roomId != null) {
+            debugPrint('parentAlive grace period doldu → session sonlandırılıyor');
+            onRoomEnded?.call();
+          }
+        });
+      } else if (val == true) {
+        // Parent yeniden bağlandı, grace timer'ı iptal et
+        _peerGraceTimer?.cancel();
+        debugPrint('parentAlive: true → parent yeniden bağlandı, grace iptal');
       }
     });
 
@@ -287,17 +338,42 @@ class RoomViewModel extends ChangeNotifier {
     
     roomId = roomCode;
 
+    // Firebase yeniden bağlandığında parentAlive: true yaz + onDisconnect yeniden kayıt et.
+    // Bu sayede ağ geçişinde baby'nin grace timer'ı iptal olur.
+    _connectivitySub = FirebaseDatabase.instance
+        .ref('.info/connected')
+        .onValue
+        .listen((event) {
+      final connected = event.snapshot.value as bool? ?? false;
+      if (connected && roomId != null) {
+        final aliveRef = FirebaseDatabase.instance.ref('rooms/$roomId/parentAlive');
+        aliveRef.set(true);
+        aliveRef.onDisconnect().set(false);
+        debugPrint('Firebase bağlandı (parent): parentAlive sıfırlandı');
+      }
+    });
+
     _listenRoomData(roomCode);
 
-    // Parent, babyAlive'ı izler; baby ayrılınca (null veya false) session kapanır.
+    // Parent, babyAlive'ı izler; ağ geçişinde grace period bekler.
     _roomAliveSub = roomRef
         .child('babyAlive')
         .onValue
         .listen((event) {
       final val = event.snapshot.value;
       if ((val == null || val == false) && roomId != null) {
-        debugPrint('babyAlive: $val → session sonlandırılıyor');
-        onRoomEnded?.call();
+        _peerGraceTimer?.cancel();
+        debugPrint('babyAlive: $val → grace period başlatıldı ($_peerGraceSeconds sn)');
+        _peerGraceTimer = Timer(const Duration(seconds: _peerGraceSeconds), () {
+          if (roomId != null) {
+            debugPrint('babyAlive grace period doldu → session sonlandırılıyor');
+            onRoomEnded?.call();
+          }
+        });
+      } else if (val == true) {
+        // Baby yeniden bağlandı
+        _peerGraceTimer?.cancel();
+        debugPrint('babyAlive: true → baby yeniden bağlandı, grace iptal');
       }
     });
 
@@ -318,6 +394,9 @@ class RoomViewModel extends ChangeNotifier {
     _cancelSessionTimeout();
     _iceRestartDelayTimer?.cancel();
     _iceRestartAttempts = 0;
+    _peerGraceTimer?.cancel();
+    _reconnectingTimeoutTimer?.cancel();
+    _reconnectingTimeoutTimer = null;
     _nightLightSub?.cancel();
     _activeSoundSub?.cancel();
     _babyVolumeSub?.cancel();
@@ -350,6 +429,7 @@ class RoomViewModel extends ChangeNotifier {
     await _webRTCService.hangUp();
     localRenderer.srcObject = null;
     remoteRenderer.srcObject = null;
+    isReconnecting = false;
     isConnected = false;
     roomId = null;
     isNightLightOn = false;
