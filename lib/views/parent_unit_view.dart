@@ -385,8 +385,6 @@ class _ParentUnitViewState extends State<ParentUnitView> {
                               _buildNinniOption(context, vm, Icons.water_drop_outlined, 'Yağmur'),
                               const SizedBox(height: 12),
                               _buildNinniOption(context, vm, Icons.child_care, 'Ninni'),
-                              const SizedBox(height: 12),
-                              _buildNinniOption(context, vm, Icons.stop_circle_outlined, 'Sesi Kapat', isStop: true),
                             ],
                           ),
                         ),
@@ -460,7 +458,8 @@ class _ParentUnitViewState extends State<ParentUnitView> {
     bool isSelected = vm.activeSound == label;
     return InkWell(
       onTap: () {
-        vm.setActiveSound(isStop ? '' : label);
+        // vm.activeSound'u closure'dan değil, tap anında doğrudan oku (stale capture önleme)
+        vm.setActiveSound(isStop ? '' : (vm.activeSound == label ? '' : label));
       },
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),

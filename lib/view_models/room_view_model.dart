@@ -185,8 +185,10 @@ class RoomViewModel extends ChangeNotifier {
     final code = (Random().nextInt(9000) + 1000).toString();
     roomId = code;
     
-    // Odayı ilk kurarken varsayılan özellikleri ve babyAlive flag'ini atomik yaz
-    FirebaseDatabase.instance.ref('rooms/$code').update({
+    // Odayı ilk kurarken varsayılan özellikleri ve babyAlive flag'ini atomik yaz.
+    // AWAIT zorunlu: dinleyiciler kurulmadan önce oda ve members kaydı
+    // Firebase'de mevcut olmalı; aksi halde güvenlik kuralı okuma iznini reddeder.
+    await FirebaseDatabase.instance.ref('rooms/$code').update({
       'createdBy': uid,
       'members': {uid: true},
       'nightLight': false,
